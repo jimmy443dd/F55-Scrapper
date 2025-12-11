@@ -1,37 +1,48 @@
 const express = require('express');
+const fetch = require('node-fetch');
+const { validateAndExtractEmails, exportToCSV } = require('./helpers');
 const path = require('path');
 const fs = require('fs');
-const { validateAndExtractEmails } = require('./helpers');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Serve static files (HTML, JS)
+// Middleware to handle JSON requests
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Endpoint to extract emails
-app.post('/extract-emails', express.json(), (req, res) => {
-  const { url, pageContent } = req.body;
+// Endpoint to fetch webpage content and extract emails
+app.post('/extract-emails', async (req, res) => {
+  const { url } = req.body;
 
-  if (!url || !pageContent) {
-    return res.status(400).json({ error: 'URL and page content are required.' });
+  if (!url || !url.startsWith('http')) {
+    return res.status(400).json({ error: 'Invalid URL. Please provide a valid URL that starts with http or https.' });
   }
 
-  const emails = validateAndExtractEmails(pageContent);
+  try {
+    // Fetch the webpage content
+    const response = await fetch(url);
+    const pageContent = await response.text();
 
-  if (emails.length > 0) {
-    // Save emails to a CSV file
-    const filePath = path.join(__dirname, 'emails.csv');
-    const csvData = 'Email\n' + emails.join('\n');
-    fs.writeFileSync(filePath, csvData, 'utf8');
+    // Extract emails using helper function
+    const emails = validateAndExtractEmails(pageContent);
 
-    return res.status(200).json({
-      message: `${emails.length} emails found.`,
-      emails,
-      downloadLink: '/emails.csv',
-    });
-  } else {
-    return res.status(200).json({ message: 'No emails found.', emails: [] });
+    if (emails.length > 0) {
+      // Save emails to a CSV file
+      const filePath = path.join(__dirname, 'emails.csv');
+      exportToCSV(emails, filePath);
+
+      return res.status(200).json({
+        message: `${emails.length} emails found.`,
+        emails,
+        downloadLink: '/emails.csv',
+      });
+    } else {
+      return res.status(200).json({ message: 'No emails found.', emails: [] });
+    }
+  } catch (error) {
+    console.error('Error fetching or processing URL:', error);
+    return res.status(500).json({ error: 'Failed to fetch or process the webpage.' });
   }
 });
 
